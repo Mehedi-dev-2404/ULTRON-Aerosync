@@ -1,0 +1,315 @@
+<canvas id="hvacCanvas" width="800" height="650" style="border:1px solid #ccc; background:#131437;"></canvas>
+<script>
+const canvas = document.getElementById('hvacCanvas');
+const ctx = canvas.getContext('2d');
+
+// Color scheme
+const primaryColor = "#FF2E73";
+const secondaryColor = "#2E4373";
+const textColor = "#FFFFFF";
+const warningColor = "#FF5555";
+const safeColor = "#55FF55";
+
+let sliders = [
+  { label: 'Crowd Density (%)', x: 50, y: 60, min: 0, max: 100, value: 50 },
+  { label: 'Outside Temp (°C)', x: 50, y: 130, min: 20, max: 45, value: 35 },
+  { label: 'Airflow (m³/s)', x: 50, y: 200, min: 1, max: 10, value: 5 }
+];
+
+let stadium = {
+  sections: [],
+  airParticles: [],
+  lastAiRecommendation: 5
+};
+
+// Initialize stadium sections (3D perspective)
+function initStadium() {
+  // Create 5 sections with 3D perspective
+  for (let s = 0; s < 5; s++) {
+    const section = {
+      x: 150 + s * 120,
+      y: 350 - s * 20,
+      width: 100,
+      height: 100 + s * 30,
+      seats: []
+    };
+    
+    // Add seats to each section (we'll populate seats based on density)
+    stadium.sections.push(section);
+  }
+  
+  // Initialize air particles
+  for (let i = 0; i < 200; i++) {
+    stadium.airParticles.push(createAirParticle(true));
+  }
+}
+
+function createAirParticle(randomStart = false) {
+  return {
+    x: randomStart ? Math.random() * 150 + 650 : 750,
+    y: 350 + Math.random() * 200,
+    vx: 0,
+    vy: 0,
+    size: 2 + Math.random() * 3,
+    life: 100 + Math.random() * 50
+  };
+}
+
+let dragging = null;
+
+function drawSlider(s) {
+  const width = 200, h = 6;
+  const posX = s.x + ((s.value - s.min) / (s.max - s.min)) * width;
+  
+  ctx.fillStyle = secondaryColor;
+  ctx.fillRect(s.x, s.y, width, h);
+  
+  ctx.fillStyle = primaryColor;
+  ctx.fillRect(s.x, s.y, posX - s.x, h);
+  
+  ctx.beginPath();
+  ctx.arc(posX, s.y + h / 2, 10, 0, Math.PI * 2);
+  ctx.fill();
+  
+  ctx.fillStyle = textColor;
+  ctx.font = '14px Arial';
+  ctx.fillText(`${s.label}: ${s.value}`, s.x, s.y - 10);
+}
+
+function updateStadium() {
+  const density = sliders[0].value / 100;
+  const airflow = sliders[2].value;
+  
+  // Update seats based on crowd density (number of dots equals density percentage)
+  stadium.sections.forEach(section => {
+    section.seats = []; // Clear existing seats
+    
+    // Calculate number of seats to show based on density (15x8 grid = 120 max per section)
+    const seatsToShow = Math.floor(density * 120);
+    
+    for (let i = 0; i < seatsToShow; i++) {
+      // Distribute seats randomly within the section
+      const row = Math.floor(i / 15);
+      const col = i % 15;
+      section.seats.push({
+        x: section.x + col * 6 + Math.random() * 2,
+        y: section.y + row * 10 + Math.random() * 2,
+        heat: 0.8 + Math.random() * 0.2 // Random heat for visual effect
+      });
+    }
+  });
+  
+  // Update air particles
+  let particlesToAdd = Math.floor(airflow * 2);
+  
+  stadium.airParticles.forEach(p => {
+    p.life--;
+    if (p.life <= 0 || p.x < 0 || p.y < 300 || p.y > 600) {
+      // Replace dead particles
+      const idx = stadium.airParticles.indexOf(p);
+      stadium.airParticles[idx] = createAirParticle();
+      return;
+    }
+    
+    // Base movement from airflow setting
+    p.vx = -airflow * (0.3 + Math.random() * 0.2);
+    
+    // Add turbulence based on nearby seat heat
+    let heatSum = 0;
+    let heatCount = 0;
+    
+    stadium.sections.forEach(section => {
+      section.seats.forEach(seat => {
+        const dist = Math.sqrt(Math.pow(seat.x - p.x, 2) + Math.pow(seat.y - p.y, 2));
+        if (dist < 40) {
+          heatSum += seat.heat;
+          heatCount++;
+        }
+      });
+    });
+    
+    if (heatCount > 0) {
+      const avgHeat = heatSum / heatCount;
+      p.vy = (Math.random() - 0.5) * avgHeat * 3;
+    }
+    
+    p.x += p.vx;
+    p.y += p.vy;
+  });
+  
+  // Add new particles based on airflow
+  while (particlesToAdd-- > 0 && stadium.airParticles.length < 300) {
+    stadium.airParticles.push(createAirParticle());
+  }
+}
+
+function drawStadium() {
+  // Draw stadium base
+  ctx.fillStyle = '#333344';
+  ctx.beginPath();
+  ctx.moveTo(100, 400);
+  ctx.lineTo(700, 350);
+  ctx.lineTo(700, 550);
+  ctx.lineTo(100, 600);
+  ctx.closePath();
+  ctx.fill();
+  
+  // Draw sections with 3D perspective
+  stadium.sections.forEach((section, i) => {
+    // Section background
+    ctx.fillStyle = `hsl(240, 30%, ${20 + i * 5}%)`;
+    ctx.beginPath();
+    ctx.moveTo(section.x, section.y);
+    ctx.lineTo(section.x + section.width, section.y - 20);
+    ctx.lineTo(section.x + section.width, section.y + section.height - 20);
+    ctx.lineTo(section.x, section.y + section.height);
+    ctx.closePath();
+    ctx.fill();
+    
+    // Seats (dots representing people)
+    section.seats.forEach(seat => {
+      const heatColor = `hsl(${20 + seat.heat * 30}, 80%, 50%)`;
+      ctx.fillStyle = heatColor;
+      ctx.beginPath();
+      ctx.arc(seat.x, seat.y, 2, 0, Math.PI * 2);
+      ctx.fill();
+    });
+  });
+  
+  // Draw air particles with motion trails
+  stadium.airParticles.forEach(p => {
+    const alpha = Math.min(1, p.life / 50);
+    ctx.fillStyle = `rgba(100, 200, 255, ${alpha * 0.7})`;
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+    ctx.fill();
+    
+    // Motion trail
+    ctx.strokeStyle = `rgba(100, 200, 255, ${alpha * 0.3})`;
+    ctx.beginPath();
+    ctx.moveTo(p.x, p.y);
+    ctx.lineTo(p.x - p.vx * 3, p.y - p.vy * 3);
+    ctx.stroke();
+  });
+  
+  // Draw air vents
+  ctx.fillStyle = primaryColor;
+  for (let y = 360; y < 540; y += 40) {
+    ctx.fillRect(720, y, 30, 20);
+  }
+  
+  // Draw legend
+  ctx.fillStyle = textColor;
+  ctx.font = '16px Arial';
+  ctx.fillText('▲ Hot Spots', 650, 320);
+  ctx.fillText('● Airflow Particles', 650, 340);
+  ctx.fillText(`👥 Crowd: ${sliders[0].value}%`, 650, 360);
+  
+  // Draw airflow direction indicator
+  ctx.strokeStyle = primaryColor;
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(700, 450);
+  ctx.lineTo(650, 450);
+  ctx.stroke();
+  ctx.fillStyle = primaryColor;
+  ctx.beginPath();
+  ctx.moveTo(655, 445);
+  ctx.lineTo(655, 455);
+  ctx.lineTo(645, 450);
+  ctx.closePath();
+  ctx.fill();
+}
+
+function drawStats() {
+  try {
+    const d = sliders[0].value;
+    const t = sliders[1].value;
+    const a = sliders[2].value;
+
+    const heat = (d * 10) + ((t - 24) * 50);
+    const cool = a * 500;
+    const reqKW = Math.max((heat - cool) / 1000, 0).toFixed(2);
+    const energy = (a * 0.3).toFixed(2);
+    // Convert to SAR (assuming 1 kWh = 0.18 SAR for commercial rates)
+    const costWithAI = (energy * 0.18 * 0.75).toFixed(2); // AI saves 25%
+    const costWithoutAI = (energy * 0.18).toFixed(2);
+    stadium.lastAiRecommendation = Math.ceil(heat / 500);
+
+    // Stats Box
+    ctx.fillStyle = 'rgba(0,0,0,0.7)';
+    ctx.fillRect(350, 50, 400, 200);
+    
+    // Stats Text
+    ctx.fillStyle = textColor;
+    ctx.font = 'bold 18px Arial';
+    ctx.fillText(`AeroSync - HVAC Simulation`, 360, 30);
+    
+    ctx.font = '16px Arial';
+    ctx.fillText(`Required Cooling: ${reqKW} kW`, 360, 80);
+    ctx.fillText(`Energy Use: ${energy} kWh`, 360, 110);
+    ctx.fillText(`Cost (with AI): ${costWithAI} SAR/hr`, 360, 140);
+    ctx.fillText(`Cost (without AI): ${costWithoutAI} SAR/hr`, 360, 170);
+    
+    // AI recommendation with color coding
+    const aiRecColor = a >= stadium.lastAiRecommendation ? safeColor : warningColor;
+    ctx.fillStyle = aiRecColor;
+    ctx.font = 'bold 16px Arial';
+    ctx.fillText(`AI Recommends: ${stadium.lastAiRecommendation} m³/s`, 360, 200);
+    
+    // Add visual feedback text
+    ctx.fillStyle = a >= stadium.lastAiRecommendation ? safeColor : warningColor;
+    ctx.font = 'bold 18px Arial';
+    const statusText = a >= stadium.lastAiRecommendation ? 
+      "✓ Optimal Airflow" : "⚠ Increase Airflow!";
+    ctx.fillText(statusText, 360, 230);
+    
+    // Add help text
+    ctx.fillStyle = textColor;
+    ctx.font = '12px Arial';
+    ctx.fillText("Adjust sliders to see how airflow affects stadium cooling", 360, 250);
+  } catch (e) {
+    console.error("Error in drawStats:", e);
+  }
+}
+
+function render() {
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  
+  drawSlider(sliders[0]);
+  drawSlider(sliders[1]);
+  drawSlider(sliders[2]);
+  drawStats();
+  
+  updateStadium();
+  drawStadium();
+  
+  requestAnimationFrame(render);
+}
+
+// Event listeners
+canvas.addEventListener('mousedown', e => {
+  const r = canvas.getBoundingClientRect();
+  const mx = e.clientX - r.left, my = e.clientY - r.top;
+  dragging = sliders.find(s => {
+    const posX = s.x + ((s.value - s.min) / (s.max - s.min)) * 200;
+    return Math.hypot(mx - posX, my - (s.y + 3)) < 10;
+  });
+});
+
+canvas.addEventListener('mousemove', e => {
+  if (dragging) {
+    const r = canvas.getBoundingClientRect();
+    const mx = e.clientX - r.left;
+    const ratio = Math.min(Math.max((mx - dragging.x) / 200, 0), 1);
+    dragging.value = Math.round(dragging.min + ratio * (dragging.max - dragging.min));
+  }
+});
+
+canvas.addEventListener('mouseup', () => dragging = null);
+canvas.addEventListener('mouseleave', () => dragging = null);
+
+// Initialize and start
+initStadium();
+render();
+</script>
