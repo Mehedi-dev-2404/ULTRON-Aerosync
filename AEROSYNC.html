@@ -1,0 +1,435 @@
+<canvas id="hvacCanvas" width="1100" height="800" style="border:1px solid #ccc; background:#131437;"></canvas>
+<script>
+class HVACStadium {
+  constructor() {
+    this.canvas = document.getElementById('hvacCanvas');
+    this.ctx = this.canvas.getContext('2d');
+    this.colors = {
+      primary: "#FF2E73",
+      secondary: "#2E4373",
+      text: "#FFFFFF",
+      warning: "#FF5555",
+      safe: "#55FF55",
+      pitch: "#1D7A1D",
+      stands: "#4A4A6A",
+      vents: "#FF914D",
+      hotZone: "rgba(255,100,100,0.3)",
+      coldZone: "rgba(100,100,255,0.3)"
+    };
+    
+    // Control sliders
+    this.sliders = [
+      { label: 'Crowd Density (%)', x: 50, y: 60, min: 0, max: 100, value: 50 },
+      { label: 'Outside Temp (°C)', x: 50, y: 130, min: 20, max: 45, value: 35 },
+      { label: 'Airflow (m³/s)', x: 50, y: 200, min: 1, max: 10, value: 5 }
+    ];
+    
+    // Stadium configuration
+    this.stadium = {
+      pitch: { x: 450, y: 300, width: 200, height: 200 },
+      stands: [],
+      people: [],
+      airParticles: [],
+      maxCapacity: 50000,
+      airVents: [],
+      heatZones: [],
+      tempHistory: [],
+      lastUpdate: 0
+    };
+    
+    this.init();
+  }
+
+  init() {
+    this.createStadiumStructure();
+    this.createAirVents();
+    this.generateHeatZones();
+    this.updatePeople();
+    this.setupEventHandlers();
+    requestAnimationFrame(this.render.bind(this));
+  }
+
+  createStadiumStructure() {
+    this.stadium.stands = [
+      { x: 350, y: 200, width: 400, height: 80, capacity: 10000 }, // North
+      { x: 350, y: 500, width: 400, height: 80, capacity: 10000 }, // South
+      { x: 650, y: 200, width: 80, height: 380, capacity: 15000 }, // East
+      { x: 350, y: 200, width: 80, height: 380, capacity: 15000 }  // West
+    ];
+  }
+
+  createAirVents() {
+    const ventCount = 12;
+    for(let i = 0; i < ventCount; i++) {
+      const angle = (i / ventCount) * Math.PI * 2;
+      this.stadium.airVents.push({
+        x: this.stadium.pitch.x + this.stadium.pitch.width/2 + Math.cos(angle) * 130,
+        y: this.stadium.pitch.y + this.stadium.pitch.height/2 + Math.sin(angle) * 130,
+        angle: angle + Math.PI,
+        power: 0.5
+      });
+    }
+  }
+
+  generateHeatZones() {
+    this.stadium.heatZones = [];
+    // Create 3-5 random heat zones in stands
+    const zoneCount = 3 + Math.floor(Math.random() * 3);
+    for(let i = 0; i < zoneCount; i++) {
+      const stand = this.stadium.stands[Math.floor(Math.random() * this.stadium.stands.length)];
+      this.stadium.heatZones.push({
+        x: stand.x + Math.random() * stand.width,
+        y: stand.y + Math.random() * stand.height,
+        radius: 50 + Math.random() * 50,
+        intensity: 0.5 + Math.random() * 0.5
+      });
+    }
+  }
+
+  updatePeople() {
+    const density = this.sliders[0].value / 100;
+    this.stadium.people = [];
+
+    this.stadium.stands.forEach(stand => {
+      const peopleCount = Math.floor(stand.capacity * density / 50); // 1 dot = 50 people
+      for(let i = 0; i < peopleCount; i++) {
+        this.stadium.people.push({
+          x: stand.x + Math.random() * stand.width,
+          y: stand.y + Math.random() * stand.height,
+          heat: 0.5 // Base heat level
+        });
+      }
+    });
+
+    // Update heat based on heat zones
+    this.stadium.people.forEach(person => {
+      this.stadium.heatZones.forEach(zone => {
+        const dist = Math.sqrt(Math.pow(person.x - zone.x, 2) + Math.pow(person.y - zone.y, 2));
+        if(dist < zone.radius) {
+          person.heat = 0.5 + zone.intensity * (1 - dist/zone.radius);
+        }
+      });
+    });
+  }
+
+  updateAirflow() {
+    const airflow = this.sliders[2].value;
+    const particlesToAdd = Math.floor(airflow * 3);
+    
+    // Remove old particles
+    this.stadium.airParticles = this.stadium.airParticles.filter(p => p.life > 0);
+    
+    // Add new particles
+    for(let i = 0; i < particlesToAdd; i++) {
+      const vent = this.stadium.airVents[Math.floor(Math.random() * this.stadium.airVents.length)];
+      this.stadium.airParticles.push({
+        x: vent.x + (Math.random() - 0.5) * 10,
+        y: vent.y + (Math.random() - 0.5) * 10,
+        vx: Math.cos(vent.angle) * (0.2 + Math.random() * 0.3) * airflow/5,
+        vy: Math.sin(vent.angle) * (0.2 + Math.random() * 0.3) * airflow/5,
+        size: 2 + Math.random() * 2,
+        life: 100 + Math.random() * 50
+      });
+    }
+    
+    // Update particles
+    this.stadium.airParticles.forEach(p => {
+      p.life--;
+      p.x += p.vx;
+      p.y += p.vy;
+      
+      // Attract particles to heat zones
+      this.stadium.heatZones.forEach(zone => {
+        const dx = zone.x - p.x;
+        const dy = zone.y - p.y;
+        const dist = Math.sqrt(dx*dx + dy*dy);
+        if(dist < zone.radius * 2) {
+          p.vx += dx * 0.0005 * zone.intensity;
+          p.vy += dy * 0.0005 * zone.intensity;
+        }
+      });
+    });
+  }
+
+  updateTemperatureHistory() {
+    const now = Date.now();
+    if(now - this.stadium.lastUpdate < 2000) return; // Update every 2 seconds
+    
+    this.stadium.lastUpdate = now;
+    const avgHeat = this.stadium.people.reduce((sum, p) => sum + p.heat, 0) / this.stadium.people.length || 0;
+    const temp = this.sliders[1].value;
+    const effectiveTemp = temp + avgHeat * 10; // Heat adds to perceived temperature
+    
+    this.stadium.tempHistory.push(effectiveTemp);
+    if(this.stadium.tempHistory.length > 20) {
+      this.stadium.tempHistory.shift();
+    }
+  }
+
+  drawStadium() {
+    // Draw pitch
+    this.ctx.fillStyle = this.colors.pitch;
+    this.ctx.fillRect(this.stadium.pitch.x, this.stadium.pitch.y, 
+                     this.stadium.pitch.width, this.stadium.pitch.height);
+    
+    // Draw stands
+    this.ctx.fillStyle = this.colors.stands;
+    this.stadium.stands.forEach(stand => {
+      this.ctx.fillRect(stand.x, stand.y, stand.width, stand.height);
+    });
+    
+    // Draw heat zones
+    this.stadium.heatZones.forEach(zone => {
+      const gradient = this.ctx.createRadialGradient(
+        zone.x, zone.y, 0,
+        zone.x, zone.y, zone.radius
+      );
+      gradient.addColorStop(0, this.colors.hotZone.replace("0.3", "0.6"));
+      gradient.addColorStop(1, this.colors.hotZone.replace("0.3", "0"));
+      this.ctx.fillStyle = gradient;
+      this.ctx.beginPath();
+      this.ctx.arc(zone.x, zone.y, zone.radius, 0, Math.PI * 2);
+      this.ctx.fill();
+    });
+    
+    // Draw people
+    this.stadium.people.forEach(person => {
+      const heatColor = `hsl(${20 + person.heat * 30}, 80%, 50%)`;
+      this.ctx.fillStyle = heatColor;
+      this.ctx.beginPath();
+      this.ctx.arc(person.x, person.y, 2, 0, Math.PI * 2);
+      this.ctx.fill();
+    });
+    
+    // Draw air particles
+    this.stadium.airParticles.forEach(p => {
+      const alpha = Math.min(1, p.life / 50);
+      this.ctx.fillStyle = `rgba(100, 200, 255, ${alpha})`;
+      this.ctx.beginPath();
+      this.ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+      this.ctx.fill();
+    });
+    
+    // Draw air vents
+    this.ctx.fillStyle = this.colors.vents;
+    this.stadium.airVents.forEach(vent => {
+      this.ctx.beginPath();
+      this.ctx.arc(vent.x, vent.y, 5, 0, Math.PI * 2);
+      this.ctx.fill();
+    });
+  }
+
+  drawTemperatureGraph() {
+    if(this.stadium.tempHistory.length < 2) return;
+    
+    const graphX = 750;
+    const graphY = 100;
+    const graphWidth = 300;
+    const graphHeight = 150;
+    
+    // Background
+    this.ctx.fillStyle = 'rgba(0,0,0,0.5)';
+    this.ctx.fillRect(graphX, graphY, graphWidth, graphHeight);
+    
+    // Border
+    this.ctx.strokeStyle = this.colors.text;
+    this.ctx.strokeRect(graphX, graphY, graphWidth, graphHeight);
+    
+    // Title
+    this.ctx.fillStyle = this.colors.text;
+    this.ctx.font = 'bold 14px Arial';
+    this.ctx.fillText('Temperature Trend (°C)', graphX + 10, graphY + 20);
+    
+    // Y-axis labels
+    const maxTemp = Math.max(...this.stadium.tempHistory, this.sliders[1].max);
+    const minTemp = Math.min(...this.stadium.tempHistory, this.sliders[1].min);
+    
+    this.ctx.font = '12px Arial';
+    this.ctx.fillText(maxTemp.toFixed(1), graphX + 10, graphY + 30);
+    this.ctx.fillText(minTemp.toFixed(1), graphX + 10, graphY + graphHeight - 10);
+    
+    // X-axis (time)
+    this.ctx.fillText('2 min ago', graphX + graphWidth - 70, graphY + graphHeight - 10);
+    this.ctx.fillText('now', graphX + graphWidth - 30, graphY + graphHeight - 10);
+    
+    // Graph line
+    this.ctx.beginPath();
+    this.ctx.strokeStyle = this.colors.primary;
+    this.ctx.lineWidth = 2;
+    
+    this.stadium.tempHistory.forEach((temp, i) => {
+      const x = graphX + 10 + (i / (this.stadium.tempHistory.length - 1)) * (graphWidth - 20);
+      const y = graphY + graphHeight - 20 - ((temp - minTemp) / (maxTemp - minTemp)) * (graphHeight - 40);
+      
+      if(i === 0) {
+        this.ctx.moveTo(x, y);
+      } else {
+        this.ctx.lineTo(x, y);
+      }
+    });
+    this.ctx.stroke();
+    
+    // Current temp indicator
+    const currentTemp = this.stadium.tempHistory[this.stadium.tempHistory.length - 1];
+    const currentY = graphY + graphHeight - 20 - ((currentTemp - minTemp) / (maxTemp - minTemp)) * (graphHeight - 40);
+    
+    this.ctx.fillStyle = this.colors.primary;
+    this.ctx.beginPath();
+    this.ctx.arc(
+      graphX + graphWidth - 10, 
+      currentY, 
+      5, 0, Math.PI * 2
+    );
+    this.ctx.fill();
+    
+    this.ctx.fillStyle = this.colors.text;
+    this.ctx.font = 'bold 12px Arial';
+    this.ctx.fillText(`${currentTemp.toFixed(1)}°C`, graphX + graphWidth - 50, currentY - 10);
+  }
+
+  drawHeatDistribution() {
+    const legendX = 750;
+    const legendY = 300;
+    const legendWidth = 300;
+    const legendHeight = 100;
+    
+    // Background
+    this.ctx.fillStyle = 'rgba(0,0,0,0.5)';
+    this.ctx.fillRect(legendX, legendY, legendWidth, legendHeight);
+    
+    // Title
+    this.ctx.fillStyle = this.colors.text;
+    this.ctx.font = 'bold 14px Arial';
+    this.ctx.fillText('Heat Zone Distribution', legendX + 10, legendY + 20);
+    
+    // Heat gradient
+    const gradient = this.ctx.createLinearGradient(legendX + 20, legendY + 40, legendX + 280, legendY + 40);
+    gradient.addColorStop(0, "hsl(240, 80%, 50%)"); // Cool
+    gradient.addColorStop(0.5, "hsl(60, 80%, 50%)"); // Moderate
+    gradient.addColorStop(1, "hsl(0, 80%, 50%)"); // Hot
+    
+    this.ctx.fillStyle = gradient;
+    this.ctx.fillRect(legendX + 20, legendY + 40, 260, 20);
+    
+    // Labels
+    this.ctx.font = '12px Arial';
+    this.ctx.fillText('Cool', legendX + 20, legendY + 80);
+    this.ctx.fillText('Moderate', legendX + 120, legendY + 80);
+    this.ctx.fillText('Hot', legendX + 240, legendY + 80);
+    
+    // Current hot zones count
+    this.ctx.fillStyle = this.colors.text;
+    this.ctx.font = 'bold 14px Arial';
+    this.ctx.fillText(`Active Hot Zones: ${this.stadium.heatZones.length}`, legendX + 10, legendY + 110);
+  }
+
+  drawSlider(s) {
+    const width = 200, h = 8;
+    const posX = s.x + ((s.value - s.min) / (s.max - s.min)) * width;
+    
+    // Track
+    this.ctx.fillStyle = this.colors.secondary + "44";
+    this.ctx.fillRect(s.x, s.y - 2, width, h + 4);
+    
+    // Progress
+    this.ctx.fillStyle = this.colors.primary;
+    this.ctx.fillRect(s.x, s.y, posX - s.x, h);
+    
+    // Thumb
+    this.ctx.beginPath();
+    this.ctx.arc(posX, s.y + h/2, 10, 0, Math.PI * 2);
+    this.ctx.fillStyle = this.colors.text;
+    this.ctx.fill();
+    
+    // Label
+    this.ctx.fillStyle = this.colors.text;
+    this.ctx.font = '14px Arial';
+    this.ctx.fillText(`${s.label}: ${s.value}`, s.x, s.y - 10);
+  }
+
+  drawStats() {
+    const currentPeople = Math.floor((this.sliders[0].value / 100) * this.stadium.maxCapacity);
+    const airflow = this.sliders[2].value;
+    const temp = this.sliders[1].value;
+    
+    // Stats panel
+    this.ctx.fillStyle = 'rgba(0,0,0,0.7)';
+    this.ctx.fillRect(50, 500, 300, 150);
+    
+    // Stats text
+    this.ctx.fillStyle = this.colors.text;
+    this.ctx.font = 'bold 16px Arial';
+    this.ctx.fillText('HVAC System Status', 60, 520);
+    
+    this.ctx.font = '14px Arial';
+    this.ctx.fillText(`Attendees: ${currentPeople.toLocaleString()}`, 60, 550);
+    this.ctx.fillText(`Airflow: ${airflow} m³/s`, 60, 580);
+    this.ctx.fillText(`Temp: ${temp}°C`, 60, 610);
+    
+    // AI recommendation
+    const heat = (this.sliders[0].value * 10) + ((temp - 24) * 50);
+    const rec = Math.ceil(heat / 500);
+    const status = airflow >= rec ? "✓ Optimal" : "⚠ Increase";
+    this.ctx.fillStyle = airflow >= rec ? this.colors.safe : this.colors.warning;
+    this.ctx.font = 'bold 14px Arial';
+    this.ctx.fillText(`AI Rec: ${rec} m³/s ${status}`, 60, 640);
+  }
+
+  render() {
+    this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+    
+    // Update systems
+    this.updatePeople();
+    this.updateAirflow();
+    this.updateTemperatureHistory();
+    
+    // Draw stadium
+    this.drawStadium();
+    
+    // Draw UI elements
+    this.sliders.forEach(s => this.drawSlider(s));
+    this.drawStats();
+    this.drawTemperatureGraph();
+    this.drawHeatDistribution();
+    
+    // Randomly regenerate heat zones occasionally
+    if(Math.random() < 0.005) {
+      this.generateHeatZones();
+    }
+    
+    requestAnimationFrame(this.render.bind(this));
+  }
+
+  setupEventHandlers() {
+    this.canvas.addEventListener('mousedown', (e) => {
+      const rect = this.canvas.getBoundingClientRect();
+      const mouse = { x: e.clientX - rect.left, y: e.clientY - rect.top };
+      
+      this.sliders.forEach(s => {
+        const posX = s.x + ((s.value - s.min)/(s.max - s.min)) * 200;
+        if(Math.hypot(mouse.x - posX, mouse.y - (s.y + 4)) < 15) {
+          this.dragging = s;
+        }
+      });
+    });
+
+    this.canvas.addEventListener('mousemove', (e) => {
+      if(this.dragging) {
+        const rect = this.canvas.getBoundingClientRect();
+        const mouseX = e.clientX - rect.left;
+        const value = Math.round(
+          ((mouseX - this.dragging.x) / 200) * (this.dragging.max - this.dragging.min) + this.dragging.min
+        );
+        this.dragging.value = Math.max(this.dragging.min, Math.min(value, this.dragging.max));
+      }
+    });
+
+    this.canvas.addEventListener('mouseup', () => {
+      this.dragging = null;
+    });
+  }
+}
+
+// Start the simulation
+const stadiumSim = new HVACStadium();
+</script>
